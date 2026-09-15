@@ -7,19 +7,7 @@ number-system calculator.
 Summon it with `Ctrl+Shift+C`, type or paste the input, build a pipeline of
 algorithms, run it, and copy the result.
 
-```
-┌─ Codec ───────────────────────────────────────────────┐
-│ INPUT        0x 0o 0b · bin() oct() hex()             │
-│  Hello, World!                                        │
-│ PIPELINE   click to edit params · right-click removes │
-│  [Base64 Encode · params] → [Hex Encode]              │
-│ EQUATION   dec 10  hex 0xa  bin 0b1010  oct 0o12      │
-│  10                                                   │
-│ ALGORITHM · Alt+J/K moves · Enter adds      󰈉 hex     │
-│  Hex Encode                                           │
-│  ...                                                  │
-└───────────────────────────────────────────────────────┘
-```
+![Codec overlay: a Base64 Decode → Lowercase pipeline with the decoded result](preview.png)
 
 ## Features
 
