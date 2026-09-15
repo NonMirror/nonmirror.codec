@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "nonmirror.codec",
+  "name": "Codec",
+  "version": "1.0.0",
+  "author": "nonmirror",
+  "license": "MIT",
+  "description": "Chain encoders, decoders and ciphers (base64, base58, base32, hex, AES, hashes) and copy the result",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Codec.qml"
+  }
+}
