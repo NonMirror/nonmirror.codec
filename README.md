@@ -141,9 +141,8 @@ Gunzip.
 ## Dependencies and privileges
 
 The plugin runs unsandboxed inside the long-lived `omarchy-shell` process with
-the user's own permissions. It does **not** use `sudo`, does not start a second
-Quickshell, and does not write outside the shell's own config/state or the
-clipboard.
+your own account's rights. It does not start a second Quickshell process and
+does not write outside the shell's own config/state or the clipboard.
 
 External commands it may spawn, all standard on Omarchy / Arch:
 
