@@ -73,8 +73,8 @@ Item {
   property int contentSpacing: Style.spacing.md
   property int fieldHeight: Math.max(Style.space(38), Style.font.body + Style.spacing.controlPaddingY * 2)
   property int algoRowHeight: Math.max(Style.space(34), Style.font.body + Style.spacing.controlPaddingY * 2)
-  property int cardWidth: Math.min(Style.space(780), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(680), panel.height - Style.gapsOut * 2)
+  property int cardWidth: Math.min(Style.space(580), panel.width - Style.gapsOut * 2)
+  property int cardHeight: Math.min(Style.space(486), panel.height - Style.gapsOut * 2)
 
   // --------------------------------------------------------------- lifecycle
 
@@ -879,7 +879,7 @@ Item {
                   text: root.algorithmName(modelData.id) + (needsParams ? "  ·  params" : "")
                   color: root.selectedText
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.title
                 }
 
                 MouseArea {
@@ -936,7 +936,7 @@ Item {
                 text: root.previewText
                 color: root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WrapAnywhere
               }
             }
@@ -965,7 +965,7 @@ Item {
             textFormat: Text.PlainText
             elide: Text.ElideRight
             text: root.focusArea === "algo"
-              ? "ALGORITHM  ·  Alt+J/K moves  ·  Enter adds  ·  Backspace removes last  ·  Ctrl+E edits last"
+              ? "ALGORITHM  ·  Ctrl+E edits last"
               : "ALGORITHM  ·  Tab or Alt+J/K to select"
             color: root.focusArea === "algo" ? root.foreground : root.faint
             font.family: root.fontFamily
@@ -1045,7 +1045,7 @@ Item {
                 text: modelData.name
                 color: hasCursor ? root.selectedText : root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.subtitle
               }
 
               Text {
