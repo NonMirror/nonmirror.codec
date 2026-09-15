@@ -38,31 +38,15 @@ algorithms, run it, and copy the result.
 - **Binary-safe** — bytes flow through the pipeline untouched; a trailing hash
   is shown as text, everything else binary is shown as hex.
 
-## Requirements
-
-All standard on Omarchy / Arch:
-
-- `bash`, coreutils (`base64`, `od`)
-- `openssl`
-- `gzip`
-- `wl-clipboard` (`wl-copy` / `wl-paste`)
-
-No Python, no Node, no extra packages.
-
 ## Install
 
 ```sh
-git clone https://github.com/NonMirror/nonmirror.codec \
-  ~/.config/omarchy/plugins/nonmirror.codec
+omarchy plugin add https://github.com/NonMirror/nonmirror.codec.git --enable
 ```
 
-Enable it in `~/.config/omarchy/shell.json` by adding it to `plugins`:
-
-```json
-"plugins": [
-  { "id": "nonmirror.codec" }
-]
-```
+The plugin declares a single `overlay` entry point and has no bar widget, so
+`--enable` records it in `~/.config/omarchy/shell.json` and it is loaded with
+the shell.
 
 Bind the hotkey in `~/.config/hypr/bindings.lua`:
 
@@ -120,7 +104,7 @@ Custom tables (paste into the step's **Alphabet** field via `Ctrl+E`):
 | Base64 URL-safe | `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_` |
 | Base32 hex | `0123456789ABCDEFGHIJKLMNOPQRSTUV` |
 | Crockford | `0123456789ABCDEFGHJKMNPQRSTVWXYZ` |
-| Base58 (Flickr) | `123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ` |
+| Base58 (Flickr) | `123456789abcdefghijklmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ` |
 
 ## Number recognition
 
@@ -154,6 +138,25 @@ Hex, Binary, ASCII, URL — each with Encode and Decode.
 XOR (`key`), SHA-256 / SHA-512 / SHA-1 / MD5 (optional hex separator), Gzip /
 Gunzip.
 
+## Dependencies and privileges
+
+The plugin runs unsandboxed inside the long-lived `omarchy-shell` process with
+the user's own permissions. It does **not** use `sudo`, does not start a second
+Quickshell, and does not write outside the shell's own config/state or the
+clipboard.
+
+External commands it may spawn, all standard on Omarchy / Arch:
+
+| Command | Used for |
+| --- | --- |
+| `openssl` | AES, RSA, SHA-256/512/SHA-1/MD5 |
+| `gzip` | Gzip / Gunzip |
+| `wl-copy`, `wl-paste` (`wl-clipboard`) | Read the paste buffer, copy results |
+| `bash`, `base64`, `od` (coreutils) | Crypto pipelines and byte plumbing |
+
+No Python, Node or other runtime is required. Native encodings, number bases
+and the calculator run in the QML JS engine without spawning anything.
+
 ## Notes and limits
 
 - **RSA** needs **PEM** key files (`openssl genpkey` / `openssl rsa -pubout`),
@@ -166,6 +169,15 @@ Gunzip.
   pipeline; add a separator in the step's parameters for spaced output.
 - **Custom alphabets** must be 32 / 58 / 64 characters long, optionally one
   more for the padding character. Duplicates and wrong lengths are rejected.
+
+## Remove
+
+```sh
+omarchy plugin remove nonmirror.codec
+```
+
+Then remove the `o.bind("CTRL + SHIFT + C", …)` line from
+`~/.config/hypr/bindings.lua` and run `hyprctl reload`.
 
 ## License
 
