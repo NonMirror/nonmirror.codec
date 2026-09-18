@@ -10,8 +10,8 @@
 //
 // Encoding, radix and text transforms run natively in the QML JS engine with
 // no process spawn. Cryptographic primitives shell out to openssl through a
-// spec: the bytes go in and come out base64-encoded on the command line, so
-// the pipeline still only ever moves bytes.
+// bounded helper: requests travel on stdin and successful results return as
+// base64 on stdout. No input or parameters are placed in process arguments.
 // ---------------------------------------------------------------------------
 
 var B64_STD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -562,6 +562,7 @@ function tokenizeEquation(input) {
 // literal, a bin/oct/hex/dec call, or an expression built from them, and null
 // when it is ordinary text. Quoted input is always text.
 function evaluateEquation(input) {
+  if (String(input).length > 4096) return null
   var trimmed = String(input === undefined || input === null ? "" : input).trim()
   if (trimmed === "" || isQuoted(trimmed)) return null
 
@@ -837,36 +838,28 @@ function build() {
       run: function(b) { return lowerBytes(b) } },
 
     // Crypto (openssl) ----------------------------------------------------
-    // A CLI step may declare params. The values are appended to the command
-    // line in declaration order after the base64 input, so $1 is always the
-    // input and $2, $3, ... are the params. The overlay collects them from the
-    // user when the step is added (or clicked in the pipeline).
+    // CLI ids map to an allowlist in codec_runner.py. All parameters and
+    // bytes are sent in a bounded JSON request over stdin; no shell scripts.
     { id: "aes-encrypt", name: "AES-256 Encrypt", group: "Crypto",
       params: [{ name: "password", label: "Password", required: true, secret: true, placeholder: "passphrase" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass "pass:$2" | base64 -w0' },
+      engine: "cli" },
     { id: "aes-decrypt", name: "AES-256 Decrypt", group: "Crypto",
       params: [{ name: "password", label: "Password", required: true, secret: true, placeholder: "passphrase" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -pass "pass:$2" | base64 -w0' },
+      engine: "cli" },
     { id: "aes-key-encrypt", name: "AES-256 Encrypt (key + IV)", group: "Crypto",
-      params: [{ name: "key", label: "Key (hex)", required: true, placeholder: "64 hex chars / 32 bytes" },
+      params: [{ name: "key", label: "Key (hex)", required: true, secret: true, placeholder: "64 hex chars / 32 bytes" },
                { name: "iv", label: "IV (hex)", required: true, placeholder: "32 hex chars / 16 bytes" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl enc -aes-256-cbc -K "$2" -iv "$3" -nosalt | base64 -w0' },
+      engine: "cli" },
     { id: "aes-key-decrypt", name: "AES-256 Decrypt (key + IV)", group: "Crypto",
-      params: [{ name: "key", label: "Key (hex)", required: true, placeholder: "64 hex chars / 32 bytes" },
+      params: [{ name: "key", label: "Key (hex)", required: true, secret: true, placeholder: "64 hex chars / 32 bytes" },
                { name: "iv", label: "IV (hex)", required: true, placeholder: "32 hex chars / 16 bytes" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl enc -d -aes-256-cbc -K "$2" -iv "$3" -nosalt | base64 -w0' },
+      engine: "cli" },
     { id: "rsa-encrypt", name: "RSA Encrypt", group: "Crypto",
       params: [{ name: "pubkey", label: "Public key file", required: true, path: true, placeholder: "~/.keys/public.pem" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl pkeyutl -encrypt -pubin -inkey "$2" | base64 -w0' },
+      engine: "cli" },
     { id: "rsa-decrypt", name: "RSA Decrypt", group: "Crypto",
       params: [{ name: "privkey", label: "Private key file", required: true, path: true, placeholder: "~/.keys/private.pem" }],
-      engine: "cli",
-      script: 'printf %s "$1" | base64 -d | openssl pkeyutl -decrypt -inkey "$2" | base64 -w0' },
+      engine: "cli" },
     { id: "xor", name: "XOR", group: "Crypto",
       params: [{ name: "key", label: "Key", required: true, placeholder: "keystream" }],
       run: function(b, params) {
@@ -877,21 +870,15 @@ function build() {
         return out
       } },
     { id: "sha256", name: "SHA-256", group: "Crypto", engine: "cli", hash: true,
-      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }],
-      script: 'printf %s "$1" | base64 -d | openssl dgst -sha256 -binary | base64 -w0' },
+      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }] },
     { id: "sha512", name: "SHA-512", group: "Crypto", engine: "cli", hash: true,
-      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }],
-      script: 'printf %s "$1" | base64 -d | openssl dgst -sha512 -binary | base64 -w0' },
+      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }] },
     { id: "sha1", name: "SHA-1", group: "Crypto", engine: "cli", hash: true,
-      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }],
-      script: 'printf %s "$1" | base64 -d | openssl dgst -sha1 -binary | base64 -w0' },
+      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }] },
     { id: "md5", name: "MD5", group: "Crypto", engine: "cli", hash: true,
-      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }],
-      script: 'printf %s "$1" | base64 -d | openssl dgst -md5 -binary | base64 -w0' },
-    { id: "gzip", name: "Gzip", group: "Crypto", engine: "cli",
-      script: 'printf %s "$1" | base64 -d | gzip -9 | base64 -w0' },
-    { id: "gunzip", name: "Gunzip", group: "Crypto", engine: "cli",
-      script: 'printf %s "$1" | base64 -d | gzip -d | base64 -w0' }
+      params: [{ name: "separator", label: "Hex separator", required: false, placeholder: "none — continuous hex" }] },
+    { id: "gzip", name: "Gzip", group: "Crypto", engine: "cli" },
+    { id: "gunzip", name: "Gunzip", group: "Crypto", engine: "cli" }
   ]
 }
 

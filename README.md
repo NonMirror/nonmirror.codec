@@ -28,6 +28,13 @@ algorithms, run it, and copy the result.
 
 ## Install
 
+Install the runtime dependencies if needed (package installation is the only
+step that needs administrator rights):
+
+```sh
+sudo pacman -S --needed python python-cryptography openssl gzip wl-clipboard coreutils
+```
+
 ```sh
 omarchy plugin add https://github.com/NonMirror/nonmirror.codec.git --enable
 ```
@@ -136,16 +143,35 @@ External commands it may spawn, all standard on Omarchy / Arch:
 
 | Command | Used for |
 | --- | --- |
-| `openssl` | AES, RSA, SHA-256/512/SHA-1/MD5 |
+| `python3` (`python`) | Bounded process supervisor and AES with raw keys |
+| `openssl` | Password-based AES, RSA, SHA-256/512/SHA-1/MD5 |
 | `gzip` | Gzip / Gunzip |
 | `wl-copy`, `wl-paste` (`wl-clipboard`) | Read the paste buffer, copy results |
-| `bash`, `base64`, `od` (coreutils) | Crypto pipelines and byte plumbing |
+| `timeout` (`coreutils`) | Deadline for the clipboard copy handoff |
 
-No Python, Node or other runtime is required. Native encodings, number bases
-and the calculator run in the QML JS engine without spawning anything.
+Python's `cryptography` module (`python-cryptography` on Arch) is required for
+AES with raw keys. Native encodings, number bases and the calculator run in
+the QML JS engine without spawning anything. No Node runtime is required.
+
+Input, passwords, keys, IVs and key paths travel through stdin or anonymous
+file descriptors; they are never included in process arguments. The helper
+does not create temporary files on disk. See [Security fixes](SECURITY_FIXES.md)
+for the threat model, implementation and regression tests.
 
 ## Notes and limits
 
+- **Resource limits:** input, clipboard reads and each step's output are
+  limited to 256 KiB; parameters to 4 KiB each; RSA key files to 64 KiB.
+  CLI steps have a 10-second deadline, clipboard reads 3 seconds, and child
+  stderr a 4 KiB ceiling. Overflow, timeout or failure discards the result
+  and terminates/reaps the worker process group. Limits apply to decompressed
+  bytes, before base64 transport to QML.
+- **UI limits:** at most 32 steps; Base58 and number-base conversions accept
+  at most 4 KiB per step; live calculator recognition accepts 4 KiB of text.
+  Copy allows up to 768 KiB for the hex representation of a binary result.
+- **AES passwords** cannot contain line breaks or NUL, because OpenSSL reads
+  one password line from a descriptor. Raw AES requires exactly 32 key bytes
+  and 16 IV bytes; leading/trailing hex whitespace is accepted.
 - **RSA** needs **PEM** key files (`openssl genpkey` / `openssl rsa -pubout`),
   not OpenSSH `ssh-rsa` lines. PKCS#1 v1.5 padding limits input to
   key-size minus overhead.

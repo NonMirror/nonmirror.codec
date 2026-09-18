@@ -45,6 +45,9 @@ Item {
   property int stepIndex: 0
   property string resultText: ""
   property bool resultBinary: false
+  readonly property int maxDataBytes: 262144
+  readonly property int maxParamBytes: 4096
+  property int session: 0
 
   // Live number/equation recognition for the current input. Shown as a preview
   // only while the pipeline is empty, so it never competes with a real run.
@@ -79,6 +82,7 @@ Item {
   // --------------------------------------------------------------- lifecycle
 
   function open(payloadJson) {
+    root.cancelOperations()
     root.opened = true
     root.phase = "edit"
     root.focusArea = "input"
@@ -99,10 +103,12 @@ Item {
   }
 
   function close() {
+    root.cancelOperations()
     root.opened = false
   }
 
   function dismiss() {
+    root.cancelOperations()
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "nonmirror.codec")
@@ -118,8 +124,36 @@ Item {
   // mean to transform, and silently prefilling it made every open start from
   // stale text.
   function requestPaste() {
-    if (pasteProc.running) pasteProc.running = false
-    pasteProc.running = true
+    if (pasteProc.busy || root.phase === "running") return
+    pasteProc.session = root.session
+    pasteProc.targetPhase = root.phase
+    pasteProc.targetParam = root.currentParam() ? root.currentParam().name : ""
+    pasteProc.targetAlgo = root.pendingAlgoId
+    pasteProc.start("")
+  }
+
+  function cancelOperations() {
+    root.session++
+    pasteProc.cancel("Operation cancelled")
+    cliProc.cancel("Operation cancelled")
+    copyProc.payload = ""
+    if (copyProc.running) copyProc.signal(15)
+    root.working = []
+    root.steps = []
+  }
+
+  // Check code units first to avoid allocating a huge UTF-8 array to measure
+  // an already oversized field; then enforce the actual byte limit.
+  function fitsText(text, limit) {
+    return text.length <= limit && Codec.textToBytes(text).length <= limit
+  }
+
+  function setInput(value) {
+    if (!root.fitsText(value, root.maxDataBytes)) {
+      root.errorText = "Input exceeds 256 KiB"
+      return
+    }
+    root.inputText = value
   }
 
   // ------------------------------------------------------------- picker state
@@ -194,6 +228,7 @@ Item {
   }
 
   function appendStep(step) {
+    if (root.chain.length >= 32) { root.errorText = "At most 32 steps are allowed"; return }
     root.chain = root.chain.concat([step])
     flash(root.algorithmName(step.id) + " added")
     root.algoQuery = ""
@@ -225,6 +260,7 @@ Item {
   }
 
   function beginParams(algoId, editingIndex) {
+    pasteProc.cancel("Paste cancelled after changing fields")
     var algo = Codec.byId(algoId)
     var list = algo && algo.params ? algo.params : []
     var existing = editingIndex >= 0 && editingIndex < root.chain.length
@@ -269,21 +305,28 @@ Item {
   // QML `var` object is occasionally dropped by the engine, and a lost
   // keystroke in a password field is exactly the kind of thing you notice.
   function setCurrentParamValue(value) {
+    if (!root.fitsText(value, root.maxParamBytes)) {
+      root.paramError = "Parameter exceeds 4 KiB"
+      return
+    }
     var param = root.currentParam()
     if (!param) return
     var next = ({})
     for (var k in root.pendingParams) next[k] = root.pendingParams[k]
     next[param.name] = value
     root.pendingParams = next
+    root.paramError = ""
   }
 
   function moveParam(delta) {
+    pasteProc.cancel("Paste cancelled after changing fields")
     var list = root.pendingParamList()
     if (list.length === 0) return
     root.paramIndex = (root.paramIndex + delta + list.length) % list.length
   }
 
   function cancelParams() {
+    pasteProc.cancel("Paste cancelled after changing fields")
     root.phase = "edit"
     root.pendingAlgoId = ""
     root.pendingParams = ({})
@@ -338,6 +381,7 @@ Item {
 
   // Tab and the arrow keys walk the two focusable rows in a ring.
   function cycleFocus(delta) {
+    pasteProc.cancel("Paste cancelled after changing fields")
     var areas = ["input", "algo"]
     var at = areas.indexOf(root.focusArea)
     if (at < 0) at = 0
@@ -355,6 +399,7 @@ Item {
 
     if (key === Qt.Key_Escape) {
       if (root.phase !== "edit") {
+        root.cancelOperations()
         root.phase = "edit"
         root.errorText = ""
       } else if (root.focusArea === "algo" && root.algoQuery) {
@@ -431,9 +476,9 @@ Item {
         if (root.calcReady) root.copyText(root.calc.primary)
         else root.runChain()
       } else if (Util.editsFilter(event, root.inputText)) {
-        root.inputText = Util.editedFilter(event, root.inputText)
+        root.setInput(Util.editedFilter(event, root.inputText))
       } else if (root.isPrintable(event)) {
-        root.inputText = root.inputText + event.text
+        root.setInput(root.inputText + event.text)
       } else {
         return
       }
@@ -481,10 +526,8 @@ Item {
       root.requestPaste()
     } else if (Util.editsFilter(event, root.currentParamValue())) {
       root.setCurrentParamValue(Util.editedFilter(event, root.currentParamValue()))
-      root.paramError = ""
     } else if (root.isPrintable(event)) {
       root.setCurrentParamValue(root.currentParamValue() + event.text)
-      root.paramError = ""
     }
     event.accepted = true
   }
@@ -492,6 +535,8 @@ Item {
   // ---------------------------------------------------------------- pipeline
 
   function runChain() {
+    if (cliProc.busy || pasteProc.busy) { root.errorText = "Wait for the current operation to stop"; return }
+    if (!root.fitsText(root.inputText, root.maxDataBytes)) { root.errorText = "Input exceeds 256 KiB"; return }
     if (root.chain.length === 0) {
       root.errorText = "Add at least one algorithm with Tab"
       return
@@ -508,6 +553,7 @@ Item {
     root.steps = prepared
     root.stepIndex = 0
     root.working = Codec.bytesForInput(root.inputText, root.calc)
+    if (root.working.length > root.maxDataBytes) { root.failRun("Input exceeds 256 KiB"); return }
     root.errorText = ""
     root.flashText = ""
     root.resultText = ""
@@ -525,6 +571,7 @@ Item {
   }
 
   function runNext() {
+    if (root.phase !== "running") return
     if (root.stepIndex >= root.steps.length) {
       finishRun()
       return
@@ -535,7 +582,12 @@ Item {
     if (algo.engine !== "cli") {
       var next
       try {
+        // Base58/radix conversion is quadratic; keep it off large buffers in
+        // the persistent QML thread. Other native transforms have fixed growth.
+        if (/^base58-|^number-/.test(algo.id) && root.working.length > 4096)
+          throw new Error("This conversion is limited to 4 KiB")
         next = algo.run(root.working, step.params)
+        if (next.length > root.maxDataBytes) throw new Error("Output exceeds 256 KiB")
       } catch (e) {
         failRun(algo.name + ": " + ((e && e.message) ? e.message : String(e)))
         return
@@ -546,19 +598,20 @@ Item {
       return
     }
 
-    // Params ride as positional arguments in declaration order: $1 is the
-    // base64 input, $2.. are the params, so no shell quoting is involved.
-    var argv = ["bash", "-c", algo.script, "codec", Codec.bytesToBase64(root.working)]
+    // The entire request goes over stdin. Arguments contain only the fixed
+    // helper pathname and operation mode, including in descendant processes.
+    var params = ({})
     var list = algo.params || []
     for (var i = 0; i < list.length; i++) {
       var value = String(step.params[list[i].name] || "")
       if (list[i].path) value = root.expandPath(value)
-      argv.push(value)
+      if (!root.fitsText(value, root.maxParamBytes)) { root.failRun("Parameter exceeds 4 KiB"); return }
+      params[list[i].name] = value
     }
-    cliProc.outText = ""
-    cliProc.errText = ""
-    cliProc.command = argv
-    cliProc.running = true
+    cliProc.session = root.session
+    var request = JSON.stringify({ id: algo.id, data: Codec.bytesToBase64(root.working), params: params })
+    if (!root.fitsText(request, 393216)) { root.failRun("Request exceeds 384 KiB"); return }
+    cliProc.start(request)
   }
 
   function finishRun() {
@@ -576,12 +629,18 @@ Item {
   }
 
   function failRun(message) {
+    root.working = []
+    root.steps = []
     root.errorText = String(message)
     root.phase = "edit"
   }
 
   function copyText(text) {
-    copyProc.command = ["bash", "-c", "printf %s \"$1\" | wl-copy --type text/plain", "codec", String(text)]
+    if (copyProc.running) return
+    if (!root.fitsText(String(text), 3 * root.maxDataBytes)) { root.errorText = "Copy exceeds 768 KiB"; return }
+    copyProc.payload = String(text)
+    copyProc.session = root.session
+    copyProc.stdinEnabled = true
     copyProc.running = true
   }
 
@@ -603,22 +662,32 @@ Item {
   }
 
   // Reads the clipboard on demand (Ctrl+V) into the focused input or param.
-  Process {
+  BoundedProcess {
     id: pasteProc
-    command: ["wl-paste", "--no-newline", "--type", "text/plain"]
-    stdout: StdioCollector {
-      id: pasteOut
-      waitForEnd: true
-    }
-    onExited: function(exitCode, exitStatus) {
-      if (!root.opened || exitCode !== 0) return
-      var pasted = pasteOut.text
+    mode: "paste"
+    property int session: 0
+    property string targetPhase: ""
+    property string targetParam: ""
+    property string targetAlgo: ""
+    onCompleted: function(ok, data, message) {
+      if (!root.opened || session !== root.session) return
+      if (!ok) { root.errorText = message; return }
+      if (targetPhase !== root.phase) return
+      var pasted = Codec.bytesToText(Codec.base64ToBytes(data))
       if (pasted === "") return
       if (root.phase === "params") {
+        if (!root.currentParam() || root.currentParam().name !== targetParam || root.pendingAlgoId !== targetAlgo) return
+        if (!root.fitsText(pasted, root.maxParamBytes - Codec.textToBytes(root.currentParamValue()).length)) {
+          root.paramError = "Parameter exceeds 4 KiB"
+          return
+        }
         root.setCurrentParamValue(root.currentParamValue() + pasted)
-        root.paramError = ""
       } else if (root.focusArea === "input") {
-        root.inputText = root.inputText + pasted
+        if (!root.fitsText(pasted, root.maxDataBytes - Codec.textToBytes(root.inputText).length)) {
+          root.errorText = "Input exceeds 256 KiB"
+          return
+        }
+        root.setInput(root.inputText + pasted)
       }
     }
   }
@@ -626,35 +695,19 @@ Item {
   // One CLI step at a time: the chain is strictly sequential, so a single
   // process is enough. Input and output travel base64-encoded, which keeps
   // binary results (AES blocks, RSA ciphertext, digests, gzip) exact.
-  Process {
+  BoundedProcess {
     id: cliProc
-    property string outText: ""
-    property string errText: ""
-    stdout: StdioCollector {
-      id: cliOut
-      waitForEnd: true
-      onStreamFinished: cliProc.outText = text
-    }
-    stderr: StdioCollector {
-      id: cliErr
-      waitForEnd: true
-      onStreamFinished: cliProc.errText = text
-    }
-    onExited: function(exitCode, exitStatus) {
-      if (root.phase !== "running") return
-      var stdout = String(cliProc.outText !== "" ? cliProc.outText : cliOut.text)
-      var stderr = String(cliProc.errText !== "" ? cliProc.errText : cliErr.text)
-      // OpenSSL exits 0 on a bad AES decrypt and reports the failure only on
-      // stderr, so the exit status alone cannot be trusted here.
-      var stderrFailed = /bad decrypt|error:|invalid|unknown option|unable to load/i.test(stderr)
-      if (exitCode !== 0 || exitStatus !== 0 || stderrFailed) {
-        var line = stderr.split("\n")[0].replace(/\s+$/, "")
-        root.failRun(line !== "" ? line : "The step failed (exit " + exitCode + ")")
+    property int session: 0
+    onCompleted: function(ok, data, message) {
+      if (root.phase !== "running" || session !== root.session) return
+      if (!ok) {
+        root.failRun(message)
         return
       }
       var bytes
       try {
-        bytes = Codec.base64ToBytes(stdout.trim())
+        bytes = Codec.base64ToBytes(data)
+        if (bytes.length > root.maxDataBytes) throw new Error("Output exceeds 256 KiB")
       } catch (e) {
         root.failRun("The step produced unexpected output")
         return
@@ -671,7 +724,23 @@ Item {
   // actually taken the text, rather than firing and dismissing immediately.
   Process {
     id: copyProc
-    onExited: root.dismiss()
+    property string payload: ""
+    property int session: 0
+    // wl-copy's successful handoff intentionally leaves its clipboard owner
+    // alive. Bound the initial handoff without putting the copied text in argv.
+    command: ["/usr/bin/timeout", "--kill-after=1s", "3s", "/usr/bin/wl-copy", "--type", "text/plain"]
+    onStarted: {
+      if (session !== root.session) { payload = ""; stdinEnabled = false; signal(15); return }
+      write(payload)
+      payload = ""
+      stdinEnabled = false
+    }
+    onExited: function(exitCode, exitStatus) {
+      payload = ""
+      if (session !== root.session) return
+      if (exitCode === 0 && exitStatus === 0) root.dismiss()
+      else root.errorText = "Could not copy the result"
+    }
   }
 
   PanelWindow {
